@@ -31,6 +31,10 @@ main :: proc() {
 
 	msg: win.MSG
 	for win.GetMessageW(&msg, nil, 0, 0) > 0 {
+		if win.IsDialogMessageW(hwnd, &msg) {
+			// This is a keyboard navigation message targeting the main window.
+			continue
+		}
 		if g_current_find_replace_window != nil && win.IsDialogMessageW(g_current_find_replace_window, &msg) {
 			// This is a keyboard navigation message targeting the find/replace window.
 			continue
@@ -66,7 +70,7 @@ wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: win.WPARAM, lpa
 
 		create_button :: proc(parent: win.HWND, font: win.HFONT, x: i32, y: ^i32, id: i32, text: win.LPCWSTR) -> win.HWND {
 			hwnd := win.CreateWindowW("BUTTON", text,
-				win.WS_VISIBLE | win.WS_CHILD | win.BS_PUSHBUTTON,
+				win.WS_VISIBLE | win.WS_CHILD | win.WS_TABSTOP | win.BS_PUSHBUTTON,
 				x, y^, 150, 25,
 				parent, cast(win.HMENU)cast(uintptr)id, nil, nil)
 			win.SendMessageW(hwnd, win.WM_SETFONT, cast(uintptr)font, 0)
