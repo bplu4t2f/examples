@@ -37,6 +37,7 @@ main :: proc() {
 		}
 		win.TranslateMessage(&msg)
 		win.DispatchMessageW(&msg)
+		free_all(context.temp_allocator)
 	}
 
 	os.exit(cast(int)msg.wParam)

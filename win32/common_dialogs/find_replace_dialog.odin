@@ -14,8 +14,8 @@ g_current_find_replace_window: win.HWND
 
 find_replace_ctx :: struct {
 	fr:           win.FINDREPLACEW,
-	find_buf:     [dynamic]win.WCHAR,
-	replace_buf:  [dynamic]win.WCHAR,
+	find_buf:     []win.WCHAR,
+	replace_buf:  []win.WCHAR,
 }
 
 find_text :: proc(
@@ -38,7 +38,7 @@ find_text :: proc(
 	// by the dialog must survive this procedure call, until the dialog
 	// reports that it is terminating (FR_DIALOGTERM).
 	ctx := new(find_replace_ctx)
-	ctx.find_buf = make([dynamic]win.WCHAR, max_find_string_length + 1)
+	ctx.find_buf = make([]win.WCHAR, max_find_string_length + 1)
 
 	if initial_search_string != "" {
 		conversion_result := win.utf8_to_utf16(ctx.find_buf[:], initial_search_string)
@@ -81,8 +81,8 @@ replace_text :: proc(
 	// by the dialog must survive this procedure call, until the dialog
 	// reports that it is terminating (FR_DIALOGTERM).
 	ctx := new(find_replace_ctx)
-	ctx.find_buf = make([dynamic]win.WCHAR, max_find_string_length + 1)
-	ctx.replace_buf = make([dynamic]win.WCHAR, max_replace_string_length + 1)
+	ctx.find_buf = make([]win.WCHAR, max_find_string_length + 1)
+	ctx.replace_buf = make([]win.WCHAR, max_replace_string_length + 1)
 
 	if initial_search_string != "" {
 		conversion_result := win.utf8_to_utf16(ctx.find_buf[:], initial_search_string)
@@ -112,6 +112,25 @@ replace_text :: proc(
 	}
 
 	g_current_find_replace_window = win.ReplaceTextW(&ctx.fr)
+	if g_current_find_replace_window == nil {
+		// Dialog creation failed.
+		delete_find_replace_context(ctx)
+	}
+}
+
+delete_find_replace_context :: proc(ctx: ^find_replace_ctx) {
+	if ctx == nil {
+		return
+	}
+	if ctx.find_buf != nil {
+		delete(ctx.find_buf)
+		ctx.find_buf = nil
+	}
+	if ctx.replace_buf != nil {
+		delete(ctx.replace_buf)
+		ctx.replace_buf = nil
+	}
+	free(ctx)
 }
 
 handle_find_replace_message :: proc(hwnd: win.HWND, wparam: win.WPARAM, lparam: win.LPARAM) {
@@ -121,11 +140,7 @@ handle_find_replace_message :: proc(hwnd: win.HWND, wparam: win.WPARAM, lparam: 
 		// Terminate dialog. We can free any memory allocated
 		// here for the find/replace dialog, and invalidate any handles.
 		fmt.printfln("Find/Replace dialog closed.")
-		delete(fr_ctx.find_buf)
-		fr_ctx.find_buf = nil
-		delete(fr_ctx.replace_buf)
-		fr_ctx.replace_buf = nil
-		free(fr_ctx)
+		delete_find_replace_context(fr_ctx)
 		g_current_find_replace_window = nil
 		return
 	}
