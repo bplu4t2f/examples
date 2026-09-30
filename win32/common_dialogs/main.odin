@@ -120,7 +120,7 @@ wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: win.WPARAM, lpa
 
 		case IDC_OPEN_FILE:
 			if nc == win.BN_CLICKED {
-				dialog_confirmed, result := file_dialog(hwnd, .open)
+				dialog_confirmed, result := file_dialog(hwnd, .open, allocator = context.temp_allocator)
 				if dialog_confirmed {
 					display_title := get_file_display_name(result)
 					fmt.printfln("Open file dialog confirmed: \"%v\" (Display name: \"%v\")", result, display_title)
@@ -131,11 +131,11 @@ wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: win.WPARAM, lpa
 
 		case IDC_SAVE_FILE:
 			if nc == win.BN_CLICKED {
-				filters := [?]file_dialog_filter {
+				filters := [?]File_Dialog_Filter {
 					{ display_text = "Text files (*.txt)", filter = "*.txt" },
 					{ display_text = "All files (*.*)", filter = "*.*" },
 				}
-				dialog_confirmed, result := file_dialog(hwnd, .save, filters = filters[:])
+				dialog_confirmed, result := file_dialog(hwnd, .save, filters = filters[:], allocator = context.temp_allocator)
 				if dialog_confirmed {
 					display_title := get_file_display_name(result)
 					fmt.printfln("Save file dialog confirmed: \"%v\" (Display name: \"%v\")", result, display_title)

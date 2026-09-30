@@ -12,7 +12,7 @@ g_find_replace_msg: win.UINT
 // only one find/replace window can be open at any time.
 g_current_find_replace_window: win.HWND
 
-find_replace_ctx :: struct {
+Find_Replace_Ctx :: struct {
 	fr:           win.FINDREPLACEW,
 	find_buf:     []win.WCHAR,
 	replace_buf:  []win.WCHAR,
@@ -37,7 +37,7 @@ find_text :: proc(
 	// This is a modeless dialog, which means the contextual memory required
 	// by the dialog must survive this procedure call, until the dialog
 	// reports that it is terminating (FR_DIALOGTERM).
-	ctx := new(find_replace_ctx)
+	ctx := new(Find_Replace_Ctx)
 	ctx.find_buf = make([]win.WCHAR, max_find_string_length + 1)
 
 	if initial_search_string != "" {
@@ -80,7 +80,7 @@ replace_text :: proc(
 	// This is a modeless dialog, which means the contextual memory required
 	// by the dialog must survive this procedure call, until the dialog
 	// reports that it is terminating (FR_DIALOGTERM).
-	ctx := new(find_replace_ctx)
+	ctx := new(Find_Replace_Ctx)
 	ctx.find_buf = make([]win.WCHAR, max_find_string_length + 1)
 	ctx.replace_buf = make([]win.WCHAR, max_replace_string_length + 1)
 
@@ -118,7 +118,7 @@ replace_text :: proc(
 	}
 }
 
-delete_find_replace_context :: proc(ctx: ^find_replace_ctx) {
+delete_find_replace_context :: proc(ctx: ^Find_Replace_Ctx) {
 	if ctx == nil {
 		return
 	}
@@ -135,7 +135,7 @@ delete_find_replace_context :: proc(ctx: ^find_replace_ctx) {
 
 handle_find_replace_message :: proc(hwnd: win.HWND, wparam: win.WPARAM, lparam: win.LPARAM) {
 	fr := cast(^win.FINDREPLACEW)cast(uintptr)lparam
-	fr_ctx := cast(^find_replace_ctx)cast(uintptr)fr.lCustData
+	fr_ctx := cast(^Find_Replace_Ctx)cast(uintptr)fr.lCustData
 	if fr.Flags & win.FR_DIALOGTERM != 0 {
 		// Terminate dialog. We can free any memory allocated
 		// here for the find/replace dialog, and invalidate any handles.
