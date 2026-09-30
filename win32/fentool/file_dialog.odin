@@ -5,12 +5,12 @@ import strings "core:strings"
 import log "core:log"
 import win "core:sys/windows"
 
-file_dialog_mode :: enum {
+File_Dialog_Mode :: enum {
 	open,
 	save,
 }
 
-file_dialog_filter :: struct {
+File_Dialog_Filter :: struct {
 	// The full line of text displayed to the user in the selection box.
 	//
 	// Examples:
@@ -28,13 +28,13 @@ file_dialog_filter :: struct {
 
 file_dialog :: proc(
 	owner:                           win.HWND,
-	mode:                            file_dialog_mode,
+	mode:                            File_Dialog_Mode,
 	initial_file:                    Maybe(string) = nil,
-	filters:                         []file_dialog_filter = nil,
+	filters:                         []File_Dialog_Filter = nil,
 	#any_int selected_filter_index:  u32 = 0,
 	dialog_caption:                  Maybe(string) = nil,
 	initial_directory:               Maybe(string) = nil,
-	allocator:                       runtime.Allocator = context.temp_allocator,
+	allocator:                       runtime.Allocator = context.allocator,
 ) -> (
 	dialog_confirmed:                bool,
 	selected_file:                   string,
@@ -97,7 +97,7 @@ file_dialog :: proc(
 // Converts the `filters` slice to the string format required by `OPENFILENAMEW.lpstrFilter`.
 //
 // Returns `nil` if `filters` is an empty slice.
-file_dialog_build_filter_string :: proc(filters: []file_dialog_filter, allocator: runtime.Allocator = context.temp_allocator) -> win.LPCWSTR {
+file_dialog_build_filter_string :: proc(filters: []File_Dialog_Filter, allocator: runtime.Allocator = context.temp_allocator) -> win.LPCWSTR {
 
 	if len(filters) == 0 {
 		return nil

@@ -13,6 +13,10 @@ MAIN_WNDCLASS_NAME :: "fen_tool_main"
 
 main :: proc() {
 
+	startup_info : win.STARTUPINFOW
+	win.GetStartupInfoW(&startup_info)
+	nCmdShow := (startup_info.dwFlags & win.STARTF_USESHOWWINDOW) != 0 ? cast(win.c_int)startup_info.wShowWindow : win.SW_SHOWDEFAULT
+
 	// For testing purposes - toggles the language of loaded resources.
 	//win.SetThreadUILanguage(0x0413)
 
@@ -31,7 +35,7 @@ main :: proc() {
 	hdlg := win.CreateDialogW(hInstance, "IDD_MAIN", nil, dlg_proc)
 	fudge_window_starting_position(hdlg)
 
-	win.ShowWindow(hdlg, win.SW_SHOW)
+	win.ShowWindow(hdlg, nCmdShow)
 
 	accelerator_table := win.LoadAcceleratorsW(hInstance, "IDC_ACCELERATOR_TABLE")
 
@@ -50,20 +54,22 @@ main :: proc() {
 	os.exit(cast(int)msg.wParam)
 }
 
-main_ctx :: struct {
+Main_Ctx :: struct {
 	runtime_context: ^runtime.Context,
-	hdlg: win.HWND,
+	// Used to suppress any change notifications while we're
+	// updating control contents programmatically.
 	updating: int,
-	current_pieces: board_pieces,
+	current_pieces: Board_Pieces,
 	// Last opened or saved file path.
 	// Used as the save path in `IDM_SAVE`.
 	// When empty, no project file is active.
+	// NOTE: This instance owns the memory associated with the string.
 	active_project_file_path: string,
 	project_dirty: bool,
 }
 
-get_main_ctx :: proc "contextless" (hdlg: win.HWND) -> ^main_ctx {
-	return cast(^main_ctx)cast(uintptr)win.GetWindowLongPtrW(hdlg, win.DWLP_USER)
+get_main_ctx :: proc "contextless" (hdlg: win.HWND) -> ^Main_Ctx {
+	return cast(^Main_Ctx)cast(uintptr)win.GetWindowLongPtrW(hdlg, win.DWLP_USER)
 }
 
 dlg_proc :: proc "system" (hdlg: win.HWND, msg: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) -> win.INT_PTR {
@@ -73,11 +79,11 @@ dlg_proc :: proc "system" (hdlg: win.HWND, msg: win.UINT, wparam: win.WPARAM, lp
 	case win.WM_INITDIALOG:
 		// Setup main window context
 		context = window_context_tls
-		ctx := new(main_ctx)
+		ctx := new(Main_Ctx)
 		ctx.runtime_context = &window_context_tls
-		ctx.hdlg = hdlg
 		win.SetWindowLongPtrW(hdlg, win.DWLP_USER, cast(win.LONG_PTR)cast(uintptr)ctx)
 
+		// Load and set the window icon.
 		hInstance := cast(win.HINSTANCE)win.GetModuleHandleW(nil)
 		idi_main := cast(rawptr)cast(uintptr)IDI_MAIN
 		icon_big   := win.LoadImageW(hInstance, cast(win.LPCWSTR)idi_main, win.IMAGE_ICON, win.GetSystemMetrics(win.SM_CXICON),   win.GetSystemMetrics(win.SM_CYICON),   win.LR_DEFAULTCOLOR | win.LR_SHARED)
@@ -85,6 +91,7 @@ dlg_proc :: proc "system" (hdlg: win.HWND, msg: win.UINT, wparam: win.WPARAM, lp
 		win.SendMessageW(hdlg, win.WM_SETICON, win.ICON_BIG,   cast(win.LPARAM)cast(uintptr)icon_big)
 		win.SendMessageW(hdlg, win.WM_SETICON, win.ICON_SMALL, cast(win.LPARAM)cast(uintptr)icon_small)
 
+		// Check initial visuals option.
 		hmenu := win.GetMenu(hdlg)
 		win.CheckMenuRadioItem(hmenu, IDM_VISUALS_NORMAL, IDM_VISUALS_GINGER, IDM_VISUALS_NORMAL, win.MF_BYCOMMAND)
 
@@ -93,13 +100,16 @@ dlg_proc :: proc "system" (hdlg: win.HWND, msg: win.UINT, wparam: win.WPARAM, lp
 	case win.WM_NCDESTROY:
 		ctx := get_main_ctx(hdlg)
 		context = ctx.runtime_context^
+		delete(ctx.active_project_file_path)
+		ctx.active_project_file_path = ""
 		free(ctx)
 
 	case win.WM_DESTROY:
 		ctx := get_main_ctx(hdlg)
 		context = ctx.runtime_context^
+		// Main window destroyed - quit message loop.
 		win.PostQuitMessage(0)
-		// Return 1 to stop DefDlgProc message handling.
+		// Return 1 to stop DefDlgProc message handling - we handle this explicitly because we're the application's main window.
 		return 1
 
 	case win.WM_CLOSE:
@@ -108,17 +118,18 @@ dlg_proc :: proc "system" (hdlg: win.HWND, msg: win.UINT, wparam: win.WPARAM, lp
 		if prompt_if_project_dirty(hdlg, ctx) {
 			win.DestroyWindow(hdlg)
 		}
-		// Return 1 to stop DefDlgProc message handling.
+		// Return 1 to stop DefDlgProc message handling - we handle this explicitly because we're the application's main window.
 		return 1
 
 	case win.WM_SIZE:
 		ctx := get_main_ctx(hdlg)
 		context = ctx.runtime_context^
-		// The status bar will adjust itself, but it does need a message to trigger it.
+		// The status bar will adjust itself to the window size, it just needs a WM_SIZE message to trigger it.
 		status_bar := win.GetDlgItem(hdlg, IDC_STATUSBAR)
 		win.SendMessageW(status_bar, win.WM_SIZE, 0, 0)
 
 	case win.WM_COMMAND:
+
 		ctx := get_main_ctx(hdlg)
 		context = ctx.runtime_context^
 		id := win.LOWORD(wparam)
@@ -127,7 +138,7 @@ dlg_proc :: proc "system" (hdlg: win.HWND, msg: win.UINT, wparam: win.WPARAM, lp
 		switch id {
 
 		case IDM_RESET_TO_STARTING_POSITION:
-			reset_to_starting_position(ctx.hdlg, ctx, prompt_for_confirmation = true)
+			reset_to_starting_position(hdlg, ctx, prompt_for_confirmation = true)
 
 		case IDM_NEW:
 			file_new(hdlg, ctx)
@@ -179,13 +190,14 @@ dlg_proc :: proc "system" (hdlg: win.HWND, msg: win.UINT, wparam: win.WPARAM, lp
 			if nc == win.EN_CHANGE {
 				if ctx.updating == 0 {
 					reparse_fen(hdlg, ctx, interactive = true)
-					set_project_dirty(ctx)
+					set_project_dirty(hdlg, ctx)
 				}
 			}
 
 		case IDC_RADIOBUTTON_WHITE_TO_MOVE,
 		     IDC_RADIOBUTTON_BLACK_TO_MOVE:
 			if nc == win.BN_CLICKED {
+				// Check the clicked radio button.
 				win.CheckRadioButton(hdlg, IDC_RADIOBUTTON_WHITE_TO_MOVE, IDC_RADIOBUTTON_BLACK_TO_MOVE, auto_cast id)
 				update_from_control_states(hdlg, ctx)
 			}
@@ -195,7 +207,7 @@ dlg_proc :: proc "system" (hdlg: win.HWND, msg: win.UINT, wparam: win.WPARAM, lp
 		     IDC_CHECKBOX_BLACK_CASTLE_KINGSIDE,
 		     IDC_CHECKBOX_BLACK_CASTLE_QUEENSIDE:
 			if nc == win.BN_CLICKED {
-				// Toggle the check state.
+				// Toggle the check state of the clicked check box.
 				current_state := win.IsDlgButtonChecked(hdlg, auto_cast id) == win.BST_CHECKED
 				new_state := current_state ? win.BST_UNCHECKED : win.BST_CHECKED
 				win.CheckDlgButton(hdlg, auto_cast id, auto_cast new_state)
@@ -226,14 +238,20 @@ dlg_proc :: proc "system" (hdlg: win.HWND, msg: win.UINT, wparam: win.WPARAM, lp
 		}
 
 	case win.WM_NOTIFY:
+
 		switch wparam {
+
 		case IDC_BOARD_CONTROL:
+
 			ctx := get_main_ctx(hdlg)
 			context = ctx.runtime_context^
 			nm := cast(^NM_BOARD_CONTROL_NOTIFICATION)cast(uintptr)lparam
-			code := cast(board_control_notification_code)nm.hdr.code
+			code := cast(Board_Control_Notification_Code)nm.hdr.code
+
 			switch code {
+
 			case .none:
+
 			case .hover:
 				if nm.hovering {
 					// Build a string like "A1 - Rook (White)"
@@ -253,6 +271,7 @@ dlg_proc :: proc "system" (hdlg: win.HWND, msg: win.UINT, wparam: win.WPARAM, lp
 				} else {
 					set_dialog_item_text(hdlg, IDC_STATUSBAR, "")
 				}
+
 			case .place_piece:
 				rank := nm.square.rank
 				file := nm.square.file
@@ -260,10 +279,12 @@ dlg_proc :: proc "system" (hdlg: win.HWND, msg: win.UINT, wparam: win.WPARAM, lp
 				ctx.current_pieces[rank * 8 + file] = piece
 				update_from_control_states(hdlg, ctx)
 				play_piece_placing_sound_if_enabled(hdlg)
+
 			case .set_en_passant_target_square:
 				square := nm.square
 				set_en_passant_target_square(hdlg, square)
 				update_from_control_states(hdlg, ctx)
+
 			case .set_castling_right:
 				castling_right := nm.castling_right
 				state := nm.castling_right_state
@@ -280,6 +301,7 @@ dlg_proc :: proc "system" (hdlg: win.HWND, msg: win.UINT, wparam: win.WPARAM, lp
 				case .black_queenside:  win.CheckDlgButton(hdlg, IDC_CHECKBOX_BLACK_CASTLE_QUEENSIDE, button_state)
 				}
 				update_from_control_states(hdlg, ctx)
+
 			case .exchange_pieces:
 				rank1 := nm.square.rank
 				file1 := nm.square.file
@@ -294,6 +316,10 @@ dlg_proc :: proc "system" (hdlg: win.HWND, msg: win.UINT, wparam: win.WPARAM, lp
 		}
 
 	case win.WM_MENUSELECT:
+		// User is hovering over any menu item.
+		// Try to get a help hint for the status bar by looking for a string resource
+		// with the same ID as the hovered menu item ID.
+		// This works because by convention, we share resource IDs in this particular way.
 		ctx := get_main_ctx(hdlg)
 		context = ctx.runtime_context^
 		menu_item_id := cast(win.UINT)win.LOWORD(wparam)
@@ -313,21 +339,27 @@ dlg_proc :: proc "system" (hdlg: win.HWND, msg: win.UINT, wparam: win.WPARAM, lp
 	return 0
 }
 
-file_new :: proc(hdlg: win.HWND, ctx: ^main_ctx) -> bool {
+//
+// File New/Open/Save/SaveAs
+//
+
+file_new :: proc(hdlg: win.HWND, ctx: ^Main_Ctx) -> bool {
 	if !prompt_if_project_dirty(hdlg, ctx) {
 		return false
 	}
 	delete(ctx.active_project_file_path)
 	ctx.active_project_file_path = ""
 	reset_to_starting_position(hdlg, ctx, set_dirty = false)
-	set_project_dirty(ctx, false)
+	set_project_dirty(hdlg, ctx, false)
 	return true
 }
 
-file_open :: proc(hdlg: win.HWND, ctx: ^main_ctx) -> bool {
+file_open :: proc(hdlg: win.HWND, ctx: ^Main_Ctx) -> bool {
+
 	if !prompt_if_project_dirty(hdlg, ctx) {
 		return false
 	}
+
 	filters := get_file_dialog_filters()
 	dialog_confirmed, file_path := file_dialog(
 		owner = hdlg,
@@ -335,9 +367,11 @@ file_open :: proc(hdlg: win.HWND, ctx: ^main_ctx) -> bool {
 		filters = filters[:],
 		allocator = context.allocator,
 	)
+
 	if !dialog_confirmed {
 		return false
 	}
+
 	data, error := os.read_entire_file_from_path(file_path, context.temp_allocator)
 	if error != nil {
 		// NOTE: The Win32 system error message can actually be nicer than what the OS package gives us here.
@@ -347,35 +381,37 @@ file_open :: proc(hdlg: win.HWND, ctx: ^main_ctx) -> bool {
 		win.MessageBoxW(hdlg, win.utf8_to_wstring(error_message, context.temp_allocator), win.utf8_to_wstring(error_caption, context.temp_allocator), win.MB_OK)
 		return false
 	}
+
 	fen := transmute(string)data
-	set_dialog_item_text(ctx.hdlg, IDC_TEXTBOX_FEN, fen)
+	set_dialog_item_text(hdlg, IDC_TEXTBOX_FEN, fen)
 	delete(ctx.active_project_file_path)
 	ctx.active_project_file_path = file_path
-	set_project_dirty(ctx, false)
+	set_project_dirty(hdlg, ctx, false)
 	return true
 }
 
-file_save :: proc(hdlg: win.HWND, ctx: ^main_ctx) -> bool {
+file_save :: proc(hdlg: win.HWND, ctx: ^Main_Ctx) -> bool {
+
 	if ctx.active_project_file_path == "" {
 		return file_save_as(hdlg, ctx)
-	} else {
-		fen := get_dialog_item_text(ctx.hdlg, IDC_TEXTBOX_FEN, 512)
-		error := os.write_entire_file(ctx.active_project_file_path, fen)
-		if error != nil {
-			// NOTE: The Win32 system error message can actually be nicer than what the OS package gives us here.
-			error_message := os.error_string(error)
-			hInstance := cast(win.HINSTANCE)win.GetModuleHandleW(nil)
-			error_caption := load_string_resource(hInstance, IDS_ERROR_CAPTION, context.temp_allocator)
-			win.MessageBoxW(hdlg, win.utf8_to_wstring(error_message, context.temp_allocator), win.utf8_to_wstring(error_caption, context.temp_allocator), win.MB_OK)
-			return false
-		}
-		set_project_dirty(ctx, false)
-		return true
 	}
+	
+	fen := get_dialog_item_text(hdlg, IDC_TEXTBOX_FEN, 512)
+	error := os.write_entire_file(ctx.active_project_file_path, fen)
+	if error != nil {
+		// NOTE: The Win32 system error message can actually be nicer than what the OS package gives us here.
+		error_message := os.error_string(error)
+		hInstance := cast(win.HINSTANCE)win.GetModuleHandleW(nil)
+		error_caption := load_string_resource(hInstance, IDS_ERROR_CAPTION, context.temp_allocator)
+		win.MessageBoxW(hdlg, win.utf8_to_wstring(error_message, context.temp_allocator), win.utf8_to_wstring(error_caption, context.temp_allocator), win.MB_OK)
+		return false
+	}
+	set_project_dirty(hdlg, ctx, false)
+	return true
 }
 
-file_save_as :: proc(hdlg: win.HWND, ctx: ^main_ctx) -> bool {
-	hInstance := cast(win.HINSTANCE)win.GetModuleHandleW(nil)
+file_save_as :: proc(hdlg: win.HWND, ctx: ^Main_Ctx) -> bool {
+
 	filters := get_file_dialog_filters()
 	dialog_confirmed, file_path := file_dialog(
 		owner = hdlg,
@@ -383,45 +419,37 @@ file_save_as :: proc(hdlg: win.HWND, ctx: ^main_ctx) -> bool {
 		filters = filters[:],
 		allocator = context.allocator,
 	)
+
 	if !dialog_confirmed {
 		return false
 	}
-	fen := get_dialog_item_text(ctx.hdlg, IDC_TEXTBOX_FEN, 512)
+
+	fen := get_dialog_item_text(hdlg, IDC_TEXTBOX_FEN, 512)
 	error := os.write_entire_file(file_path, fen)
 	if error != nil {
 		// NOTE: The Win32 system error message can actually be nicer than what the OS package gives us here.
 		error_message := os.error_string(error)
+		hInstance := cast(win.HINSTANCE)win.GetModuleHandleW(nil)
 		error_caption := load_string_resource(hInstance, IDS_ERROR_CAPTION, context.temp_allocator)
 		win.MessageBoxW(hdlg, win.utf8_to_wstring(error_message, context.temp_allocator), win.utf8_to_wstring(error_caption, context.temp_allocator), win.MB_OK)
 		return false
 	}
+
 	delete(ctx.active_project_file_path)
 	ctx.active_project_file_path = file_path
-	set_project_dirty(ctx, false)
+	set_project_dirty(hdlg, ctx, false)
 	return true
 }
 
-get_file_dialog_filters :: proc() -> [2]file_dialog_filter {
+get_file_dialog_filters :: proc() -> [2]File_Dialog_Filter {
 	hInstance := cast(win.HINSTANCE)win.GetModuleHandleW(nil)
-	return [2]file_dialog_filter {
+	return [2]File_Dialog_Filter {
 		{ display_text = load_string_resource(hInstance, IDS_FEN_FILES_FILTER), filter = "*.fen" },
 		{ display_text = load_string_resource(hInstance, IDS_ALL_FILES_FILTER), filter = "*.*" },
 	}
 }
 
-play_piece_placing_sound_if_enabled :: proc(hdlg: win.HWND) {
-	hmenu := win.GetMenu(hdlg)
-	mii: win.MENUITEMINFOW
-	mii.cbSize = size_of(win.MENUITEMINFOW)
-	mii.fMask = win.MIIM_STATE
-	win.GetMenuItemInfoW(hmenu, IDM_PLAY_SOUND, false, &mii)
-	checked := (mii.fState & win.MFS_CHECKED) != 0
-	if checked {
-		win.PlaySoundW("IDW_CLACK", win.GetModuleHandleW(nil), win.SND_ASYNC | win.SND_RESOURCE)
-	}
-}
-
-prompt_if_project_dirty :: proc(hdlg: win.HWND, ctx: ^main_ctx) -> bool {
+prompt_if_project_dirty :: proc(hdlg: win.HWND, ctx: ^Main_Ctx) -> bool {
 	if ctx.project_dirty {
 		hInstance := cast(win.HINSTANCE)win.GetModuleHandleW(nil)
 		text := load_string_resource(hInstance, IDS_UNSAVED_CHANGES_MESSAGE)
@@ -442,7 +470,7 @@ prompt_if_project_dirty :: proc(hdlg: win.HWND, ctx: ^main_ctx) -> bool {
 	return true
 }
 
-set_project_dirty :: proc(ctx: ^main_ctx, dirty := true) {
+set_project_dirty :: proc(hdlg: win.HWND, ctx: ^Main_Ctx, dirty := true) {
 	if ctx.project_dirty != dirty {
 		ctx.project_dirty = dirty
 		if dirty {
@@ -450,12 +478,26 @@ set_project_dirty :: proc(ctx: ^main_ctx, dirty := true) {
 			hInstance := cast(win.HINSTANCE)win.GetModuleHandleW(nil)
 			caption := load_string_resource(hInstance, IDS_TITLE, context.temp_allocator)
 			caption_dirty := strings.concatenate({ caption, "*" }, context.temp_allocator)
-			win.SetWindowTextW(ctx.hdlg, win.utf8_to_wstring(caption_dirty, context.temp_allocator))
+			win.SetWindowTextW(hdlg, win.utf8_to_wstring(caption_dirty, context.temp_allocator))
 		} else {
 			hInstance := cast(win.HINSTANCE)win.GetModuleHandleW(nil)
 			caption := load_string_resource(hInstance, IDS_TITLE, context.temp_allocator)
-			win.SetWindowTextW(ctx.hdlg, win.utf8_to_wstring(caption, context.temp_allocator))
+			win.SetWindowTextW(hdlg, win.utf8_to_wstring(caption, context.temp_allocator))
 		}
+	}
+}
+
+play_piece_placing_sound_if_enabled :: proc(hdlg: win.HWND) {
+	// Query the "Play Sound" option directly from the menu.
+	hmenu := win.GetMenu(hdlg)
+	mii: win.MENUITEMINFOW
+	mii.cbSize = size_of(win.MENUITEMINFOW)
+	mii.fMask = win.MIIM_STATE
+	win.GetMenuItemInfoW(hmenu, IDM_PLAY_SOUND, false, &mii)
+	checked := (mii.fState & win.MFS_CHECKED) != 0
+	if checked {
+		// PlaySoundW can play the sound directly from the resource.
+		win.PlaySoundW("IDW_CLACK", win.GetModuleHandleW(nil), win.SND_ASYNC | win.SND_RESOURCE)
 	}
 }
 
@@ -485,7 +527,7 @@ show_en_passant_validation_tip :: proc(hdlg: win.HWND) {
 	win.SendDlgItemMessageW(hdlg, IDC_TEXTBOX_EN_PASSANT_TARGET_SQUARE, win.EM_SHOWBALLOONTIP, 0, cast(win.LPARAM)cast(uintptr)&tip)
 }
 
-format_piece_display_text :: proc(piece: board_piece, allocator := context.temp_allocator) -> string {
+format_piece_display_text :: proc(piece: Board_Piece, allocator := context.temp_allocator) -> string {
 
 	type_str: string
 
@@ -515,7 +557,7 @@ format_piece_display_text :: proc(piece: board_piece, allocator := context.temp_
 
 STARTING_POSITION_FEN :: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
-reset_to_starting_position :: proc(hdlg: win.HWND, ctx: ^main_ctx, set_dirty := true, prompt_for_confirmation := false) {
+reset_to_starting_position :: proc(hdlg: win.HWND, ctx: ^Main_Ctx, set_dirty := true, prompt_for_confirmation := false) {
 
 	if prompt_for_confirmation {
 		hInstance := cast(win.HINSTANCE)win.GetModuleHandleW(nil)
@@ -532,7 +574,7 @@ reset_to_starting_position :: proc(hdlg: win.HWND, ctx: ^main_ctx, set_dirty := 
 		defer ctx.updating -= 1
 		set_dialog_item_text_cstring16(hdlg, IDC_TEXTBOX_FEN, STARTING_POSITION_FEN)
 		if set_dirty {
-			set_project_dirty(ctx)
+			set_project_dirty(hdlg, ctx)
 		}
 	}
 
@@ -541,10 +583,13 @@ reset_to_starting_position :: proc(hdlg: win.HWND, ctx: ^main_ctx, set_dirty := 
 
 // Parses the contents of the FEN string text box, and updates all
 // controls accordingly to the board state it denotes.
-reparse_fen :: proc(hdlg: win.HWND, ctx: ^main_ctx, interactive: bool) {
+//
+//  - `interactive`: Displays a balloon tip if the text box contains an invalid FEN string.
+//                   Should only be used if this was called after direct user interaction.
+reparse_fen :: proc(hdlg: win.HWND, ctx: ^Main_Ctx, interactive: bool) {
+
 	fen_string := get_dialog_item_text(hdlg, IDC_TEXTBOX_FEN, 512, context.temp_allocator)
 	if fen_string == "" {
-		fmt.printfln("FEN string is fucked.")
 		return
 	}
 
@@ -565,8 +610,7 @@ reparse_fen :: proc(hdlg: win.HWND, ctx: ^main_ctx, interactive: bool) {
 		return
 	}
 
-	fmt.printfln("Board:")
-	fmt.printfln("%v", board_format_full(board))
+	log.debugf("Board:\r\n%v", board_format_full(board))
 
 	ctx.updating += 1
 	defer ctx.updating -= 1
@@ -596,7 +640,7 @@ reparse_fen :: proc(hdlg: win.HWND, ctx: ^main_ctx, interactive: bool) {
 	win.SetDlgItemInt(hdlg, IDC_TEXTBOX_FULLMOVE_NUMBER, cast(win.UINT)board.fullmove_number, true)
 }
 
-set_en_passant_target_square :: proc(hdlg: win.HWND, square: square_specifier) {
+set_en_passant_target_square :: proc(hdlg: win.HWND, square: Square_Specifier) {
 	square_text := board_format_en_passant_target_square(square)
 	set_dialog_item_text(hdlg, IDC_TEXTBOX_EN_PASSANT_TARGET_SQUARE, square_text)
 }
@@ -604,7 +648,7 @@ set_en_passant_target_square :: proc(hdlg: win.HWND, square: square_specifier) {
 // Queries the state of all controls, and then displays the
 // corresponding FEN string in the FEN string text box, and the
 // board state in the board control.
-update_from_control_states :: proc(hdlg: win.HWND, ctx: ^main_ctx) {
+update_from_control_states :: proc(hdlg: win.HWND, ctx: ^Main_Ctx) {
 
 	// Construct board from control states.
 	board, board_ok := get_board_from_control_states(hdlg, ctx)
@@ -632,16 +676,16 @@ update_from_control_states :: proc(hdlg: win.HWND, ctx: ^main_ctx) {
 		log.debugf("FEN string changing from %q to %q", old_fen_string, fen_string)
 		fen_wstr := win.utf8_to_wstring_alloc(fen_string, context.temp_allocator)
 		win.SetDlgItemTextW(hdlg, IDC_TEXTBOX_FEN, fen_wstr)
-		set_project_dirty(ctx)
+		set_project_dirty(hdlg, ctx)
 	}
 }
 
-get_board_from_control_states :: proc(hdlg: win.HWND, ctx: ^main_ctx) -> (result: board, ok: bool) {
+get_board_from_control_states :: proc(hdlg: win.HWND, ctx: ^Main_Ctx) -> (result: Board, ok: bool) {
 
 	log.debugf("Constructing board from control states...")
 
 	// Collect all information in this board instance.
-	board: board
+	board: Board
 
 	board.pieces = ctx.current_pieces
 
@@ -688,12 +732,13 @@ get_board_from_control_states :: proc(hdlg: win.HWND, ctx: ^main_ctx) -> (result
 	return board, true
 }
 
-construct_fen_string_from_board :: proc(board: board) -> (result: string, ok: bool) {
+construct_fen_string_from_board :: proc(board: Board) -> (result: string, ok: bool) {
 	fen_string := format_fen(board)
 	return fen_string, true
 }
 
-parse_en_passant_target_square :: proc(s0: string) -> (result: square_specifier, ok: bool) {
+parse_en_passant_target_square :: proc(s0: string) -> (result: Square_Specifier, ok: bool) {
+
 	s := strings.trim_space(s0)
 	if s == "" || s == "-" {
 		// We interpret an empty string as "no en passant".

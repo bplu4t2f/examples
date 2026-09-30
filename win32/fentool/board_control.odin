@@ -7,6 +7,8 @@ import win "core:sys/windows"
 
 BOARD_CONTROL_CLASS_NAME :: "board_control"
 
+// Called on application startup to register the board control window class
+// for use in the main dialog template.
 board_control_register_class :: proc(instance: win.HINSTANCE) {
 	wndclass := win.WNDCLASSEXW {
 		cbSize = size_of(win.WNDCLASSEXW),
@@ -21,7 +23,8 @@ board_control_register_class :: proc(instance: win.HINSTANCE) {
 	win.RegisterClassExW(&wndclass)
 }
 
-board_control_set_board :: proc(hwnd: win.HWND, board: board) {
+// Called by the application whenever the board state changes.
+board_control_set_board :: proc(hwnd: win.HWND, board: Board) {
 	ctx := board_control_get_ctx(hwnd)
 	if ctx.board != board {
 		ctx.board = board
@@ -32,7 +35,8 @@ board_control_set_board :: proc(hwnd: win.HWND, board: board) {
 	}
 }
 
-board_control_set_spritemap :: proc(hwnd: win.HWND, spritemap: board_control_spritemap) {
+// Called by the application when the user selects a different spritemap.
+board_control_set_spritemap :: proc(hwnd: win.HWND, spritemap: Board_Control_Spritemap) {
 	ctx := board_control_get_ctx(hwnd)
 	if ctx.spritemap != spritemap {
 		ctx.spritemap = spritemap
@@ -43,46 +47,47 @@ board_control_set_spritemap :: proc(hwnd: win.HWND, spritemap: board_control_spr
 	}
 }
 
-board_control_spritemap :: enum {
+Board_Control_Spritemap :: enum {
 	normal,
 	ginger,
 }
 
-board_control_get_spritemap_resource_name :: proc(spritemap: board_control_spritemap) -> string {
+board_control_get_spritemap_resource_name :: proc(spritemap: Board_Control_Spritemap) -> string {
 	switch spritemap {
-	case .normal: return "IDR_PIECES_NORMAL"
-	case .ginger: return "IDR_PIECES_GINGER"
-	case: return "IDR_PIECES_NORMAL"
+	case .normal:  return "IDR_PIECES_NORMAL"
+	case .ginger:  return "IDR_PIECES_GINGER"
+	case:          return "IDR_PIECES_NORMAL"
 	}
 }
 
 @(private="file")
-board_control_ctx :: struct {
+Board_Control_Ctx :: struct {
 	runtime_context: ^runtime.Context,
 	font: win.HFONT,
-	board: board,
+	// Copy of the board state visualized by the board control.
+	board: Board,
 
-	spritemap: board_control_spritemap,
+	spritemap: Board_Control_Spritemap,
 	spritemap_cache: win.HBITMAP,
 
 	// Last known mouse client coordinates; needed for piece drag and drop.
 	mouse_client: [2]i32,
 
-	hover_mode: board_control_hover_mode,
-	hovered_square: square_specifier,
+	hover_mode: Board_Control_Hover_Mode,
+	hovered_square: Square_Specifier,
 
 	menu_open: bool,
-	menu_square: square_specifier,
+	menu_square: Square_Specifier,
 
-	pending_castling_right: castling_right,
-	pending_castling_right_state: castling_right_state,
+	pending_castling_right: Castling_Right,
+	pending_castling_right_state: Castling_Right_State,
 
 	dragging: bool,
-	drag_from: square_specifier,
+	drag_from: Square_Specifier,
 }
 
 @(private="file")
-board_control_hover_mode :: enum {
+Board_Control_Hover_Mode :: enum {
 	none,
 	// User is currently using the mouse to highlight squares.
 	mouse,
@@ -90,24 +95,28 @@ board_control_hover_mode :: enum {
 	keyboard,
 }
 
-castling_right :: enum {
+Castling_Right :: enum {
 	white_kingside,
 	white_queenside,
 	black_kingside,
 	black_queenside,
 }
 
-castling_right_state :: enum {
+Castling_Right_State :: enum {
 	allow,
 	disallow,
 }
 
-@(private="file")
-board_control_get_ctx :: proc "contextless" (hwnd: win.HWND) -> ^board_control_ctx {
-	return cast(^board_control_ctx)cast(uintptr)win.GetWindowLongPtrW(hwnd, 0)
-}
+//
+// Notifications
+//
+// When the user interacts with the board control (e.g. place a piece), this control
+// will notify the parent. The authority to execute the requested action lies with
+// the parent.
+//
 
-board_control_notification_code :: enum win.UINT {
+// Notification code for `NMHDR.code`
+Board_Control_Notification_Code :: enum win.UINT {
 	none,
 	hover,
 	place_piece,
@@ -117,21 +126,26 @@ board_control_notification_code :: enum win.UINT {
 }
 
 NM_BOARD_CONTROL_NOTIFICATION :: struct {
-	hdr: win.NMHDR,
-	hovering: bool,
-	square: square_specifier,
-	piece: board_piece,
-	castling_right: castling_right,
-	castling_right_state: castling_right_state,
-	square2: square_specifier,
+	// Adhere to standard Win32 notification structure:
+	// This struct must start with an `NMHDR`.
+	hdr:                   win.NMHDR,
+	hovering:              bool,
+	square:                Square_Specifier,
+	piece:                 Board_Piece,
+	castling_right:        Castling_Right,
+	castling_right_state:  Castling_Right_State,
+	square2:               Square_Specifier,
 }
 
-board_control_set_hovered_square :: proc(hwnd: win.HWND, ctx: ^board_control_ctx, mode: board_control_hover_mode, square: square_specifier) {
+// Called by the board control when the hovered square has changed,
+// either through mouse or keyboard interaction.
+//
+// Will update state and notify the parent if appropriate.
+board_control_set_hovered_square :: proc(hwnd: win.HWND, ctx: ^Board_Control_Ctx, mode: Board_Control_Hover_Mode, square: Square_Specifier) {
 	if ctx.hover_mode == mode && ctx.hovered_square == square {
 		// No change.
 		return
 	}
-	//log.debugf("Hover state changed to %v - %v, %v", mode, square.rank, square.file)
 	ctx.hover_mode = mode
 	ctx.hovered_square = square
 	is_hovering := mode != .none
@@ -139,7 +153,7 @@ board_control_set_hovered_square :: proc(hwnd: win.HWND, ctx: ^board_control_ctx
 	win.InvalidateRect(hwnd, nil, true)
 }
 
-board_control_notify_cell_hover :: proc(hwnd: win.HWND, hovering: bool, square: square_specifier) {
+board_control_notify_cell_hover :: proc(hwnd: win.HWND, hovering: bool, square: Square_Specifier) {
 	parent := win.GetParent(hwnd)
 	if parent == nil {
 		return
@@ -148,7 +162,7 @@ board_control_notify_cell_hover :: proc(hwnd: win.HWND, hovering: bool, square: 
 		hdr = {
 			hwndFrom = hwnd,
 			idFrom = cast(uintptr)win.GetDlgCtrlID(hwnd),
-			code = cast(win.UINT)board_control_notification_code.hover,
+			code = cast(win.UINT)Board_Control_Notification_Code.hover,
 		},
 		hovering = hovering,
 		square = square,
@@ -156,7 +170,7 @@ board_control_notify_cell_hover :: proc(hwnd: win.HWND, hovering: bool, square: 
 	win.SendMessageW(parent, win.WM_NOTIFY, nm.hdr.idFrom, cast(win.LPARAM)cast(uintptr)&nm)
 }
 
-board_control_notify_piece :: proc(hwnd: win.HWND, square: square_specifier, piece: board_piece) {
+board_control_notify_piece :: proc(hwnd: win.HWND, square: Square_Specifier, piece: Board_Piece) {
 	parent := win.GetParent(hwnd)
 	if parent == nil {
 		return
@@ -165,7 +179,7 @@ board_control_notify_piece :: proc(hwnd: win.HWND, square: square_specifier, pie
 		hdr = {
 			hwndFrom = hwnd,
 			idFrom = cast(uintptr)win.GetDlgCtrlID(hwnd),
-			code = cast(win.UINT)board_control_notification_code.place_piece,
+			code = cast(win.UINT)Board_Control_Notification_Code.place_piece,
 		},
 		square = square,
 		piece = piece,
@@ -173,7 +187,7 @@ board_control_notify_piece :: proc(hwnd: win.HWND, square: square_specifier, pie
 	win.SendMessageW(parent, win.WM_NOTIFY, nm.hdr.idFrom, cast(win.LPARAM)cast(uintptr)&nm)
 }
 
-board_control_notify_exchange_pieces :: proc(hwnd: win.HWND, square1, square2: square_specifier) {
+board_control_notify_exchange_pieces :: proc(hwnd: win.HWND, square1, square2: Square_Specifier) {
 	parent := win.GetParent(hwnd)
 	if parent == nil {
 		return
@@ -182,7 +196,7 @@ board_control_notify_exchange_pieces :: proc(hwnd: win.HWND, square1, square2: s
 		hdr = {
 			hwndFrom = hwnd,
 			idFrom = cast(uintptr)win.GetDlgCtrlID(hwnd),
-			code = cast(win.UINT)board_control_notification_code.exchange_pieces,
+			code = cast(win.UINT)Board_Control_Notification_Code.exchange_pieces,
 		},
 		square  = square1,
 		square2 = square2,
@@ -190,7 +204,7 @@ board_control_notify_exchange_pieces :: proc(hwnd: win.HWND, square1, square2: s
 	win.SendMessageW(parent, win.WM_NOTIFY, nm.hdr.idFrom, cast(win.LPARAM)cast(uintptr)&nm)
 }
 
-board_control_notify_set_en_passant_target_square :: proc(hwnd: win.HWND, square: square_specifier) {
+board_control_notify_set_en_passant_target_square :: proc(hwnd: win.HWND, square: Square_Specifier) {
 	parent := win.GetParent(hwnd)
 	if parent == nil {
 		return
@@ -199,14 +213,14 @@ board_control_notify_set_en_passant_target_square :: proc(hwnd: win.HWND, square
 		hdr = {
 			hwndFrom = hwnd,
 			idFrom = cast(uintptr)win.GetDlgCtrlID(hwnd),
-			code = cast(win.UINT)board_control_notification_code.set_en_passant_target_square,
+			code = cast(win.UINT)Board_Control_Notification_Code.set_en_passant_target_square,
 		},
 		square = square,
 	}
 	win.SendMessageW(parent, win.WM_NOTIFY, nm.hdr.idFrom, cast(win.LPARAM)cast(uintptr)&nm)
 }
 
-board_control_notify_set_castling_right :: proc(hwnd: win.HWND, castling_right: castling_right, state: castling_right_state) {
+board_control_notify_set_castling_right :: proc(hwnd: win.HWND, castling_right: Castling_Right, state: Castling_Right_State) {
 	parent := win.GetParent(hwnd)
 	if parent == nil {
 		return
@@ -215,7 +229,7 @@ board_control_notify_set_castling_right :: proc(hwnd: win.HWND, castling_right: 
 		hdr = {
 			hwndFrom = hwnd,
 			idFrom = cast(uintptr)win.GetDlgCtrlID(hwnd),
-			code = cast(win.UINT)board_control_notification_code.set_castling_right,
+			code = cast(win.UINT)Board_Control_Notification_Code.set_castling_right,
 		},
 		castling_right = castling_right,
 		castling_right_state = state,
@@ -224,13 +238,19 @@ board_control_notify_set_castling_right :: proc(hwnd: win.HWND, castling_right: 
 }
 
 @(private="file")
+board_control_get_ctx :: proc "contextless" (hwnd: win.HWND) -> ^Board_Control_Ctx {
+	return cast(^Board_Control_Ctx)cast(uintptr)win.GetWindowLongPtrW(hwnd, 0)
+}
+
+@(private="file")
 board_control_wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) -> win.LRESULT {
 
 	switch msg {
 
 	case win.WM_CREATE:
+		// Setup window context.
 		context = window_context_tls
-		ctx := new(board_control_ctx)
+		ctx := new(Board_Control_Ctx)
 		ctx.runtime_context = &window_context_tls
 		win.SetWindowLongPtrW(hwnd, 0, cast(win.LONG_PTR)cast(uintptr)ctx)
 
@@ -242,10 +262,13 @@ board_control_wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: w
 		free(ctx)
 
 	case win.WM_SETFONT:
+		// Standard Win32 infrastructure for controls that draw text.
+		// Called by the parent (either explicitly or through DS_SETFONT).
 		ctx := board_control_get_ctx(hwnd)
 		ctx.font = cast(win.HFONT)wparam
 
 	case win.WM_GETFONT:
+		// Standard Win32 infrastructure for controls that draw text.
 		ctx := board_control_get_ctx(hwnd)
 		return cast(win.LRESULT)cast(uintptr)ctx.font
 
@@ -256,6 +279,8 @@ board_control_wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: w
 		w := rc.right - rc.left
 		h := rc.bottom - rc.top
 		if w != h {
+			// Use the width here for both.
+			// NOTE: min(w,h) could cause the control to shrink unexpectedly on DPI changes.
 			win.SetWindowPos(hwnd, nil, 0, 0, w, w, win.SWP_NOZORDER | win.SWP_NOMOVE)
 			return 0
 		}
@@ -265,9 +290,11 @@ board_control_wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: w
 		context = ctx.runtime_context^
 		x_client := win.GET_X_LPARAM(lparam)
 		y_client := win.GET_Y_LPARAM(lparam)
+		// Update drag and drop target coordinates for painting the dragged piece.
 		board_control_set_drag_target_coords(hwnd, ctx, x_client, y_client)
 		square, ok := board_control_get_square_from_client_coords(hwnd, x_client, y_client)
 		board_control_set_hovered_square(hwnd, ctx, ok ? .mouse : .none, square)
+		// Setup mouse event tracking so that we get WM_MOUSELEAVE.
 		tme := win.TRACKMOUSEEVENT {
 			cbSize = size_of(win.TRACKMOUSEEVENT),
 			hwndTrack = hwnd,
@@ -311,6 +338,7 @@ board_control_wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: w
 		}
 
 		if ctx.dragging {
+			// Complete piece dragging operation.
 			x_client := win.GET_X_LPARAM(lparam)
 			y_client := win.GET_Y_LPARAM(lparam)
 			ctx.dragging = false
@@ -332,12 +360,14 @@ board_control_wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: w
 		}
 
 	case win.WM_CONTEXTMENU:
+
 		ctx := board_control_get_ctx(hwnd)
 		context = ctx.runtime_context^
 		x_screen := win.GET_X_LPARAM(lparam)
 		y_screen := win.GET_Y_LPARAM(lparam)
 		x_client: i32
 		y_client: i32
+
 		if x_screen == -1 && y_screen == -1 {
 			// This was triggered by a non-mouse event (e.g. the "VK_APPS" key on the keyboard).
 			// NOTE: This is ambiguous. (-1, -1) could technically be valid screen coordinates
@@ -367,9 +397,11 @@ board_control_wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: w
 			x_client = pt.x
 			y_client = pt.y
 		}
+
 		log.debugf("lparam: 0x%8x - screen x, y: %v, %v - client x, y: %v %v", lparam, x_screen, y_screen, x_client, y_client)
 		square, ok := board_control_get_square_from_client_coords(hwnd, x_client, y_client)
 		if ok {
+			// Load and open the context menu.
 			hInstance := cast(win.HINSTANCE)cast(uintptr)win.GetWindowLongPtrW(hwnd, win.GWLP_HINSTANCE)
 			menu := win.LoadMenuW(hInstance, "IDM_BOARD_CONTEXT_MENU")
 			if menu == nil {
@@ -379,6 +411,8 @@ board_control_wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: w
 				break
 			}
 			defer win.DestroyMenu(menu)
+			// NOTE: A context menu must be a popup menu specifically. If defined in a resource as a menu template,
+			//       the containing menu is just a dummy "main menu".
 			popup := win.GetSubMenu(menu, 0)
 			if popup == nil {
 				error := win.GetLastError()
@@ -424,16 +458,25 @@ board_control_wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: w
 				win.InvalidateRect(hwnd, nil, true)
 			}
 
+			// Actually shows the menu, and returns when the menu is closed.
+			// The action chosen by the user (if any) is sent as a WM_COMMAND message.
 			win.TrackPopupMenu(popup, 0, x_screen, y_screen, 0, hwnd, nil)
 		}
 
 	case win.WM_MENUSELECT:
+		// Conventional Win32 infrastructure:
+		// Notify the parent of the selected (i.e. hovered) menu item so that it can
+		// update the status bar text with a hint text, if applicable.
 		parent := win.GetParent(hwnd)
 		if parent != nil {
 			return win.SendMessageW(parent, msg, wparam, lparam)
 		}
 
 	case win.WM_GETDLGCODE:
+		// Instructs `IsDialogMessageW` in the main message loop that this control
+		// wants to handle arrow keys. Otherwise, arrow keys would be swallowed by
+		// keyboard navigation logic in `IsDialogMessageW`.
+		// We need the arrow keys to navigate through the squares on the board.
 		return win.DLGC_WANTARROWS
 
 	case win.WM_SETFOCUS:
@@ -466,7 +509,7 @@ board_control_wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: w
 			// NOTE: We could use independent state variables for the "keyboard-hovered" square.
 			rank := clamp(ctx.hovered_square.rank + delta_rank, 0, 7)
 			file := clamp(ctx.hovered_square.file + delta_file, 0, 7)
-			square := square_specifier { rank = rank, file = file }
+			square := Square_Specifier { rank = rank, file = file }
 			board_control_set_hovered_square(hwnd, ctx, .keyboard, square)
 		}
 
@@ -500,16 +543,19 @@ board_control_wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: w
 		}
 
 	case win.WM_ERASEBKGND:
+		// Suppress this: All painting is done in WM_PAINT through buffered painting to prevent flicker.
 		return 1
 
 	case win.WM_PAINT:
 		ctx := board_control_get_ctx(hwnd)
 		context = ctx.runtime_context^
 
-		// Setup WM_PAINT infrastructure
+		// Setup WM_PAINT infrastructure.
 		ps: win.PAINTSTRUCT
 		hdc0 := win.BeginPaint(hwnd, &ps)
 		defer win.EndPaint(hwnd, &ps)
+
+		// Setup buffered painting (to prevent flicker).
 		hdc: win.HDC
 		paintbuffer := win.BeginBufferedPaint(hdc0, &ps.rcPaint, .BPBF_TOPDOWNDIB, nil, &hdc)
 		defer win.EndBufferedPaint(paintbuffer, true)
@@ -525,8 +571,7 @@ board_control_wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: w
 
 		client: win.RECT
 		win.GetClientRect(hwnd, &client)
-		x, y, w, h := board_control_get_board_bounds(hwnd, client)
-		//log.debugf("Board bounds: %v, %v, %v, %v", x, y, w, h)
+		bx, by, bw, bh := board_control_get_board_bounds(hwnd, client)
 
 		dark_square_brush := win.CreateSolidBrush(win.RGB(175, 185, 170))
 		defer win.DeleteObject(auto_cast dark_square_brush)
@@ -542,7 +587,7 @@ board_control_wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: w
 
 		highlight_thickness := adjust_for_dpi(hwnd, 3)
 
-		should_highlight_square :: proc(ctx: ^board_control_ctx, square: square_specifier) -> bool {
+		should_highlight_square :: proc(ctx: ^Board_Control_Ctx, square: Square_Specifier) -> bool {
 			if ctx.menu_open {
 				return square == ctx.menu_square
 			} else if ctx.hover_mode != .none {
@@ -559,12 +604,12 @@ board_control_wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: w
 		for rank in 0 ..< i32(8) {
 			for file in 0 ..< i32(8) {
 				square_rect := win.RECT {
-					left   = auto_cast (x + (w * (file  )) / 8),
-					top    = auto_cast (y + (h * (7-rank)) / 8),
-					right  = auto_cast (x + (w * (file+1)) / 8),
-					bottom = auto_cast (y + (h * (8-rank)) / 8),
+					left   = auto_cast (bx + (bw * (file  )) / 8),
+					top    = auto_cast (by + (bh * (7-rank)) / 8),
+					right  = auto_cast (bx + (bw * (file+1)) / 8),
+					bottom = auto_cast (by + (bh * (8-rank)) / 8),
 				}
-				square := square_specifier { rank = cast(i8)rank, file = cast(i8)file }
+				square := Square_Specifier { rank = cast(i8)rank, file = cast(i8)file }
 				brush: win.HBRUSH
 				if should_highlight_square(ctx, square) {
 					brush = highlight_square_brush
@@ -593,7 +638,7 @@ board_control_wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: w
 		// Paint border (board frame)
 
 		stroke_rectangle_precise(hdc, client, win.RGB(0, 0, 0))
-		board_rc := win.RECT { x, y, x + w, y + h }
+		board_rc := win.RECT { bx, by, bx + bw, by + bh }
 		stroke_rectangle_precise(hdc, board_rc, win.RGB(0, 0, 0), -1)
 
 		// Paint file and rank names
@@ -603,9 +648,9 @@ board_control_wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: w
 
 		for file in 0 ..< i32(8) {
 			label_rect := win.RECT {
-				left   = auto_cast (x + (w * (file  )) / 8),
+				left   = auto_cast (bx + (bw * (file  )) / 8),
 				top    = board_rc.bottom,
-				right  = auto_cast (x + (w * (file+1)) / 8),
+				right  = auto_cast (bx + (bw * (file+1)) / 8),
 				bottom = client.bottom,
 			}
 			file_string := cast(rune)('A' + file)
@@ -617,9 +662,9 @@ board_control_wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: w
 		for rank in 0 ..< i32(8) {
 			label_rect := win.RECT {
 				left   = client.left,
-				top    = auto_cast (y + (h * (7-rank)) / 8),
+				top    = auto_cast (by + (bh * (7-rank)) / 8),
 				right  = board_rc.left,
-				bottom = auto_cast (y + (h * (8-rank)) / 8),
+				bottom = auto_cast (by + (bh * (8-rank)) / 8),
 			}
 			rank_string := cast(rune)('1' + rank)
 			sb := strings.builder_make_len_cap(0, 4, context.temp_allocator)
@@ -641,7 +686,7 @@ board_control_wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: w
 			log.errorf("Error loading piece sprite bitmap: %v", msg)
 		}
 
-		load_pieces_png :: proc(spritemap: board_control_spritemap) -> win.HBITMAP {
+		load_pieces_png :: proc(spritemap: Board_Control_Spritemap) -> win.HBITMAP {
 			resource_name := board_control_get_spritemap_resource_name(spritemap)
 			hModule := win.GetModuleHandleW(nil)
 			return load_hbitmap_from_png_rcdata(hModule, win.utf8_to_wstring(resource_name, context.temp_allocator))
@@ -663,10 +708,10 @@ board_control_wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: w
 					piece := ctx.board.pieces[rank * 8 + file]
 					if piece.type != .none {
 						square_rect := win.RECT {
-							left   = auto_cast (x + (w * (file  )) / 8),
-							top    = auto_cast (y + (h * (7-rank)) / 8),
-							right  = auto_cast (x + (w * (file+1)) / 8),
-							bottom = auto_cast (y + (h * (8-rank)) / 8),
+							left   = auto_cast (bx + (bw * (file  )) / 8),
+							top    = auto_cast (by + (bh * (7-rank)) / 8),
+							right  = auto_cast (bx + (bw * (file+1)) / 8),
+							bottom = auto_cast (by + (bh * (8-rank)) / 8),
 						}
 						xd := square_rect.left
 						yd := square_rect.top
@@ -693,10 +738,10 @@ board_control_wndproc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: w
 				from_file := cast(i32)ctx.drag_from.file
 				piece := ctx.board.pieces[from_rank * 8 + from_file]
 				square_rect := win.RECT {
-					left   = auto_cast (x + (w * (from_file  )) / 8),
-					top    = auto_cast (y + (h * (7-from_rank)) / 8),
-					right  = auto_cast (x + (w * (from_file+1)) / 8),
-					bottom = auto_cast (y + (h * (8-from_rank)) / 8),
+					left   = auto_cast (bx + (bw * (from_file  )) / 8),
+					top    = auto_cast (by + (bh * (7-from_rank)) / 8),
+					right  = auto_cast (bx + (bw * (from_file+1)) / 8),
+					bottom = auto_cast (by + (bh * (8-from_rank)) / 8),
 				}
 				wd := square_rect.right - square_rect.left
 				hd := square_rect.bottom - square_rect.top
@@ -728,7 +773,14 @@ adjust_for_dpi :: proc(hwnd: win.HWND, i: i32) -> i32 {
 // Returns the castling right toggle action that is appropriate for clicking on the specified square.
 // E.g. if the user clicks on A1, they can toggle the castling right for white queenside.
 // The `toggle_state` will be the opposite state (allow/disallow) of the current board state.
-board_control_get_castling_right_toggle_action :: proc(ctx: ^board_control_ctx, square: square_specifier) -> (castling_right: castling_right, toggle_state: castling_right_state, enable: bool) {
+board_control_get_castling_right_toggle_action :: proc(
+	ctx: ^Board_Control_Ctx,
+	square: Square_Specifier,
+) -> (
+	castling_right: Castling_Right,
+	toggle_state: Castling_Right_State,
+	enable: bool,
+) {
 	currently_allowed: bool
 	switch {
 	case square.rank == 0 && square.file == 0:
@@ -769,7 +821,7 @@ board_control_get_board_bounds :: proc(hwnd: win.HWND, client: win.RECT) -> (x, 
 	return
 }
 
-board_control_get_square_from_client_coords :: proc(hwnd: win.HWND, client_x, client_y: i32) -> (square: square_specifier, ok: bool) {
+board_control_get_square_from_client_coords :: proc(hwnd: win.HWND, client_x, client_y: i32) -> (square: Square_Specifier, ok: bool) {
 	client: win.RECT
 	win.GetClientRect(hwnd, &client)
 	x, y, w, h := board_control_get_board_bounds(hwnd, client)
@@ -789,7 +841,7 @@ board_control_get_square_from_client_coords :: proc(hwnd: win.HWND, client_x, cl
 }
 
 // Get the source rectangle for the sprite for `piece` in the sprite map.
-board_control_get_sprite_src :: proc(piece: board_piece) -> (x, y, w, h: i32) {
+board_control_get_sprite_src :: proc(piece: Board_Piece) -> (x, y, w, h: i32) {
 	if piece.type == .none {
 		return
 	}
@@ -812,7 +864,7 @@ board_control_get_sprite_src :: proc(piece: board_piece) -> (x, y, w, h: i32) {
 // Stores the specified mouse client coordinates for the visual position of the currently dragged piece.
 //
 // Coordinates values (-1, -1) mean that the mouse is not over the board.
-board_control_set_drag_target_coords :: proc(hwnd: win.HWND, ctx: ^board_control_ctx, x_client, y_client: i32) {
+board_control_set_drag_target_coords :: proc(hwnd: win.HWND, ctx: ^Board_Control_Ctx, x_client, y_client: i32) {
 	if ctx.dragging && ctx.mouse_client != { x_client, y_client } {
 		ctx.mouse_client = { x_client, y_client }
 		win.InvalidateRect(hwnd, nil, true)

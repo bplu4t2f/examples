@@ -54,6 +54,21 @@ be a somewhat self-contained control class.
 Notes
 -----
 
+**Resource IDs**
+
+The resource compiler (`rc.exe`) understands C preprocessor directives. Thus, in a
+C program, you would include the same `resource.h` header file from the `.rc` file
+as in the main C program. In Odin, the resource ID definitions must be synchronized
+explicitly (see `resource.odin`). This is a matter of simple text transformation,
+so it can be automated (not done in this project for simplicity).
+
+Not all resources need to have numeric IDs. For example, `DIALOG[EX]` resource IDs
+can be strings. The associated resource loading functions (e.g. `CreateDialog...`)
+accept either a pointer to a null-terminated string, or a 16-bit integer.
+
+This can occasionally be problematic in Odin currently, because the compiler will
+not let you cast an arbitrary constant integer value to a `cstring16`.
+
 **DPI awareness**
 
 DPI awareness is a large topic. This example relies on Windows already doing most

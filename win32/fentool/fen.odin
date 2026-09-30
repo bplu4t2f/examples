@@ -7,7 +7,7 @@ import strings "core:strings"
 import strconv "core:strconv"
 import win "core:sys/windows"
 
-parse_fen_error :: struct {
+Parse_FEN_Error :: struct {
 	is_error: bool,
 	cursor: int,
 	display_message: string,
@@ -15,22 +15,22 @@ parse_fen_error :: struct {
 
 // Retrieves the (possibly) localized error string with the specified ID from the embedded resource, and formats
 // the error with the given arguments.
-make_fen_errorf :: proc(ctx: parse_ctx, allocator: runtime.Allocator, string_resource_id: win.UINT, args: ..any) -> parse_fen_error {
+make_fen_errorf :: proc(ctx: Parse_Ctx, allocator: runtime.Allocator, string_resource_id: win.UINT, args: ..any) -> Parse_FEN_Error {
 	hInstance := cast(win.HINSTANCE)win.GetModuleHandleW(nil)
 	format := load_string_resource(hInstance, string_resource_id)
 	message := fmt.aprintf(format, args = args, allocator = allocator)
-	return parse_fen_error {
+	return Parse_FEN_Error {
 		is_error = true,
 		cursor = ctx.c,
 		display_message = message,
 	}
 }
 
-parse_fen :: proc(s: string, allocator := context.temp_allocator) -> (board: board, error: parse_fen_error) {
+parse_fen :: proc(s: string, allocator := context.temp_allocator) -> (board: Board, error: Parse_FEN_Error) {
 
 	// rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
 
-	ctx := parse_ctx { s = s }
+	ctx := Parse_Ctx { s = s }
 	eat_spaces(&ctx)
 
 	// rank index 0 is the "1" rank on the board.
@@ -41,20 +41,20 @@ parse_fen :: proc(s: string, allocator := context.temp_allocator) -> (board: boa
 		file := 0
 		rank_loop: for {
 			c := cast(rune)ctx.s[ctx.c] if ctx.c < len(ctx.s) else 0
-			piece: Maybe(board_piece)
+			piece: Maybe(Board_Piece)
 			switch c {
-			case 'r': piece = board_piece { .rook,   .black }
-			case 'n': piece = board_piece { .knight, .black }
-			case 'b': piece = board_piece { .bishop, .black }
-			case 'q': piece = board_piece { .queen,  .black }
-			case 'k': piece = board_piece { .king,   .black }
-			case 'p': piece = board_piece { .pawn,   .black }
-			case 'R': piece = board_piece { .rook,   .white }
-			case 'N': piece = board_piece { .knight, .white }
-			case 'B': piece = board_piece { .bishop, .white }
-			case 'Q': piece = board_piece { .queen,  .white }
-			case 'K': piece = board_piece { .king,   .white }
-			case 'P': piece = board_piece { .pawn,   .white }
+			case 'r': piece = Board_Piece { .rook,   .black }
+			case 'n': piece = Board_Piece { .knight, .black }
+			case 'b': piece = Board_Piece { .bishop, .black }
+			case 'q': piece = Board_Piece { .queen,  .black }
+			case 'k': piece = Board_Piece { .king,   .black }
+			case 'p': piece = Board_Piece { .pawn,   .black }
+			case 'R': piece = Board_Piece { .rook,   .white }
+			case 'N': piece = Board_Piece { .knight, .white }
+			case 'B': piece = Board_Piece { .bishop, .white }
+			case 'Q': piece = Board_Piece { .queen,  .white }
+			case 'K': piece = Board_Piece { .king,   .white }
+			case 'P': piece = Board_Piece { .pawn,   .white }
 			case:
 				if c == '/' {
 					if file != 8 || rank == 0 {
@@ -325,7 +325,7 @@ parse_fen :: proc(s: string, allocator := context.temp_allocator) -> (board: boa
 	return
 }
 
-format_fen :: proc(board: board, allocator := context.temp_allocator) -> string {
+format_fen :: proc(board: Board, allocator := context.temp_allocator) -> string {
 	sb := strings.builder_make_len_cap(0, 200, allocator)
 
 	fen_write_pieces(&sb, board.pieces)
@@ -370,7 +370,7 @@ format_fen :: proc(board: board, allocator := context.temp_allocator) -> string 
 	return strings.to_string(sb)
 }
 
-fen_write_pieces :: proc(sb: ^strings.Builder, pieces: board_pieces) {
+fen_write_pieces :: proc(sb: ^strings.Builder, pieces: Board_Pieces) {
 	assert(len(pieces) == 64)
 
 	// file index 0 is the 'A' file.
@@ -423,7 +423,7 @@ fen_write_pieces :: proc(sb: ^strings.Builder, pieces: board_pieces) {
 	}
 }
 
-fen_write_en_passant_target_square :: proc(sb: ^strings.Builder, square: square_specifier) {
+fen_write_en_passant_target_square :: proc(sb: ^strings.Builder, square: Square_Specifier) {
 	if square == {} {
 		// NOTE: This works because (0, 0) is never a valid en passant square.
 		strings.write_string(sb, "-")
@@ -443,21 +443,21 @@ fen_write_en_passant_target_square :: proc(sb: ^strings.Builder, square: square_
 }
 
 @(private="file")
-parse_ctx :: struct {
+Parse_Ctx :: struct {
 	s: string,
 	c: int,
-	board: board,
+	board: Board,
 }
 
 @(private="file")
-eat_spaces :: proc(ctx: ^parse_ctx) {
+eat_spaces :: proc(ctx: ^Parse_Ctx) {
 	for ctx.c < len(ctx.s) && strings.is_ascii_space(cast(rune)ctx.s[ctx.c]) {
 		ctx.c += 1
 	}
 }
 
 @(private="file")
-read_number :: proc(ctx: ^parse_ctx) -> string {
+read_number :: proc(ctx: ^Parse_Ctx) -> string {
 	start := ctx.c
 	for {
 		c := ctx.s[ctx.c] if ctx.c < len(ctx.s) else 0

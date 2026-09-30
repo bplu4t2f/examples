@@ -1,3 +1,4 @@
+// Read this file as UTF-8
 #pragma code_page(65001)
 
 #include <winuser.h>
@@ -8,12 +9,12 @@ LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
 
 CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "app.manifest"
 
-IDI_MAIN ICON "icon.ico"
-IDB_ABOUT BITMAP "about.bmp"
-IDR_PIECES_NORMAL RCDATA "piecesnormal.png"
-IDR_PIECES_GINGER RCDATA "billchess.png"
-
-IDW_CLACK WAVE "clack.wav"
+// NOTE: The icon with the lowest ID value becomes the executable's main icon (displayed in Windows Explorer).
+IDI_MAIN           ICON    "icon.ico"
+IDB_ABOUT          BITMAP  "about.bmp"
+IDR_PIECES_NORMAL  RCDATA  "piecesnormal.png"
+IDR_PIECES_GINGER  RCDATA  "billchess.png"
+IDW_CLACK          WAVE    "clack.wav"
 
 LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 
@@ -43,6 +44,7 @@ BEGIN
 	END
 END
 
+// Help hints for IDM_MAIN_MENU
 STRINGTABLE
 BEGIN
 	IDM_NEW                            "Creates a new position."
@@ -131,6 +133,7 @@ BEGIN
 	END
 END
 
+// Help hints for IDM_BOARD_CONTEXT_MENU
 STRINGTABLE
 BEGIN
 	IDM_SQUARE_INFO                    "Displays the selected square."
@@ -243,6 +246,7 @@ BEGIN
 	END
 END
 
+// Help hints for IDM_MAIN_MENU
 STRINGTABLE
 BEGIN
 	IDM_NEW                            "Maakt een nieuwe positie aan."
@@ -343,6 +347,7 @@ BEGIN
 	END
 END
 
+// Help hints for IDM_BOARD_CONTEXT_MENU
 STRINGTABLE
 BEGIN
 	IDM_SQUARE_INFO                    "Toont het geselecteerde veld."

@@ -3,31 +3,33 @@ package fen_tool
 import fmt "core:fmt"
 import strings "core:strings"
 
-board :: struct {
-	pieces:                      board_pieces, // Rank-major, file-minor.
-	turn_player:                 board_piece_color,
+Board :: struct {
+	pieces:                      Board_Pieces,
+	turn_player:                 Board_Piece_Color,
 	white_can_castle_kingside:   bool,
 	white_can_castle_queenside:  bool,
 	black_can_castle_kingside:   bool,
 	black_can_castle_queenside:  bool,
-	en_passant_target_square:    square_specifier,
+	en_passant_target_square:    Square_Specifier,
 	halfmove_clock:              i32,
 	fullmove_number:             i32,
 }
 
-square_specifier :: struct {
+Square_Specifier :: struct {
 	file: i8,
 	rank: i8,
 }
 
-board_piece :: struct {
-	type:   board_piece_type,
-	color:  board_piece_color,
+Board_Piece :: struct {
+	type:   Board_Piece_Type,
+	color:  Board_Piece_Color,
 }
 
-board_pieces :: distinct [64]board_piece
+// Rank-major, file-minor.
+// Starting position has white rook at index 0, white knight at index 1, and so on.
+Board_Pieces :: distinct [64]Board_Piece
 
-board_piece_type :: enum i8 {
+Board_Piece_Type :: enum i8 {
 	none,
 	rook,
 	FIRST = rook,
@@ -39,14 +41,14 @@ board_piece_type :: enum i8 {
 	LAST = pawn,
 }
 
-board_piece_color :: enum i8 {
+Board_Piece_Color :: enum i8 {
 	white,
 	FIRST = white,
 	black,
 	LAST = black,
 }
 
-board_format_full :: proc(board: board, allocator := context.temp_allocator) -> string {
+board_format_full :: proc(board: Board, allocator := context.temp_allocator) -> string {
 	sb := strings.builder_make_len_cap(0, 1000, allocator)
 	fmt.sbprintfln(&sb, "%v", board_format_pieces(board, allocator))
 	fmt.sbprintfln(&sb, "White can castle kingside:  %v", board_format_yesno(board.white_can_castle_kingside))
@@ -62,15 +64,15 @@ board_format_full :: proc(board: board, allocator := context.temp_allocator) -> 
 board_format_position :: proc { board_format_position_file_rank, board_format_position_square }
 
 board_format_position_file_rank :: proc(#any_int file: i32, #any_int rank: i32, allocator := context.temp_allocator) -> string {
-	file_string := cast(rune)('A' + file)
-	rank_string := cast(rune)('1' + rank)
+	file_rune := cast(rune)('A' + file)
+	rank_rune := cast(rune)('1' + rank)
 	sb := strings.builder_make_len_cap(0, 4, context.temp_allocator)
-	strings.write_rune(&sb, file_string)
-	strings.write_rune(&sb, rank_string)
+	strings.write_rune(&sb, file_rune)
+	strings.write_rune(&sb, rank_rune)
 	return strings.to_string(sb)
 }
 
-board_format_position_square :: proc(square: square_specifier, allocator := context.temp_allocator) -> string {
+board_format_position_square :: proc(square: Square_Specifier, allocator := context.temp_allocator) -> string {
 	return board_format_position_file_rank(square.file, square.rank, allocator)
 }
 
@@ -78,14 +80,14 @@ board_format_yesno :: proc(b: bool) -> string {
 	return b ? "yes" : "no"
 }
 
-board_format_en_passant_target_square :: proc(ts: square_specifier, allocator := context.temp_allocator) -> string {
+board_format_en_passant_target_square :: proc(ts: Square_Specifier, allocator := context.temp_allocator) -> string {
 	if ts == {} {
 		return "-"
 	}
 	return board_format_position(ts, allocator)
 }
 
-board_format_pieces :: proc(board: board, allocator := context.temp_allocator) -> string {
+board_format_pieces :: proc(board: Board, allocator := context.temp_allocator) -> string {
 	// Construct the string like this:
 	// 8 | rnbqkbnr
 	// 7 | pppppppp
@@ -114,7 +116,7 @@ board_format_pieces :: proc(board: board, allocator := context.temp_allocator) -
 	return strings.to_string(sb)
 }
 
-get_piece_rune :: proc(piece: board_piece) -> rune {
+get_piece_rune :: proc(piece: Board_Piece) -> rune {
 	switch {
 	case piece.type == .none: return '.'
 	case piece == { .rook,   .white }: return 'R'
