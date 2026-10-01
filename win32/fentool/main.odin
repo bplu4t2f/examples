@@ -33,6 +33,7 @@ main :: proc() {
 	window_context_tls = context
 
 	hdlg := win.CreateDialogW(hInstance, "IDD_MAIN", nil, dlg_proc)
+	assert(hdlg != nil, "Could not create main dialog. Is 'resource.rc' compiled properly?")
 	fudge_window_starting_position(hdlg)
 
 	win.ShowWindow(hdlg, nCmdShow)
